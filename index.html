@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Messenger</title>
+  <style>
+    * { box-sizing: border-box; }
+    html, body { margin: 0; height: 100%; }
+    body {
+      height: 100dvh;                      /* fill the screen even as the phone's URL bar comes and goes */
+      display: flex; flex-direction: column;
+      font-family: system-ui, -apple-system, sans-serif;
+      background: #f2f2f7; color: #111;
+    }
+    [hidden] { display: none !important; }
+    input, button { font: inherit; font-size: 16px; }   /* 16px stops iOS zooming in when you tap an input */
+    input { padding: 10px 12px; border: 1px solid #c7c7cc; border-radius: 20px; background: #fff; }
+    button { padding: 10px 16px; border: 0; border-radius: 20px; background: #0a84ff; color: #fff; }
+
+    /* Join screen */
+    #join { margin: auto; width: min(90vw, 360px); display: flex; flex-direction: column; gap: 12px; }
+    #join h1 { margin: 0 0 8px; }
+    #join form { display: contents; }
+    #join label { display: flex; flex-direction: column; gap: 4px; font-size: 14px; color: #555; }
+    #join p { margin: 0; font-size: 14px; color: #777; }
+    .status { margin: 0; padding: 8px 12px; font-size: 14px; background: #ffe5e5; color: #a00; }
+
+    /* Chat screen */
+    #chat { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+    #chat header {
+      display: flex; justify-content: space-between; align-items: center;
+      padding: 10px 16px; background: #fff; border-bottom: 1px solid #ddd;
+    }
+    #chat header button { background: none; color: #0a84ff; padding: 4px 0; }
+    #messages { flex: 1; min-height: 0; overflow-y: auto; padding: 12px; display: flex; flex-direction: column; gap: 6px; }
+    .msg { max-width: 75%; padding: 8px 12px; border-radius: 16px; background: #fff; align-self: flex-start; overflow-wrap: anywhere; }
+    .msg.mine { background: #0a84ff; color: #fff; align-self: flex-end; }
+    .msg small { display: block; font-size: 11px; opacity: 0.6; margin-bottom: 2px; }
+    #send-form {
+      display: flex; gap: 8px; padding: 8px;
+      padding-bottom: calc(8px + env(safe-area-inset-bottom));   /* clear the iPhone home bar */
+      background: #fff; border-top: 1px solid #ddd;
+    }
+    #send-form input { flex: 1; min-width: 0; }
+  </style>
+</head>
+<body>
+  <section id="join">
+    <h1>Messenger</h1>
+    <form id="join-form">
+      <label>Your name
+        <input id="name-input" required maxlength="30" autocomplete="nickname">
+      </label>
+      <label>Room code
+        <input id="room-input" required maxlength="40" autocapitalize="none" autocomplete="off">
+      </label>
+      <button>Join</button>
+    </form>
+    <p>Everyone who enters the same room code sees the same messages. Share it with a friend.</p>
+    <p id="join-status" class="status" hidden></p>
+  </section>
+
+  <section id="chat" hidden>
+    <header>
+      <strong id="room-label"></strong>
+      <button id="leave-button" type="button">Leave</button>
+    </header>
+    <p id="chat-status" class="status" hidden></p>
+    <div id="messages"></div>
+    <form id="send-form">
+      <input id="text-input" placeholder="Message" maxlength="500" autocomplete="off" required>
+      <button>Send</button>
+    </form>
+  </section>
+
+  <script>
+    // ⬇ CHANGE THIS to your own backend's address (the Vercel URL, with no trailing slash)
+    const API = "http://localhost:3000";
+
+    const POLL_INTERVAL = 2000;  // milliseconds between checks for new messages
+
+    const $ = (id) => document.getElementById(id);
+    let myName = "";
+    let room = "";
+    let pollTimer = null;
+    let lastSeen = "";           // the last message list we drew, so we only redraw when something changed
+
+    // ---- Joining a room ------------------------------------------------------
+
+    if (API.includes("YOUR-PROJECT")) {
+      $("join-status").textContent = "Set the API address at the top of the <script> in index.html first.";
+      $("join-status").hidden = false;
+    }
+
+    // Prefill the room from the URL (?room=...) and the name from last time, so rejoining is one tap.
+    $("room-input").value = new URLSearchParams(location.search).get("room") || randomRoomCode();
+    $("name-input").value = localStorage.getItem("name") || "";
+
+    $("join-form").addEventListener("submit", (event) => {
+      event.preventDefault();
+      myName = $("name-input").value.trim();
+      room = $("room-input").value.trim().toLowerCase();
+      localStorage.setItem("name", myName);
+      setUrl("?room=" + encodeURIComponent(room));  // now the URL itself is shareable
+      $("room-label").textContent = room;
+      $("join").hidden = true;
+      $("chat").hidden = false;
+      startPolling();
+    });
+
+    $("leave-button").addEventListener("click", () => {
+      stopPolling();
+      room = "";
+      lastSeen = "";
+      $("messages").innerHTML = "";
+      setUrl(location.pathname);
+      $("chat").hidden = true;
+      $("join").hidden = false;
+    });
+
+    // ---- Receiving: ask the server every few seconds -------------------------
+
+    async function fetchMessages() {
+      try {
+        const response = await fetch(`${API}/api/messages?room=${encodeURIComponent(room)}`);
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || response.statusText);  // the backend explained what's wrong
+        render(data);
+        $("chat-status").hidden = true;
+      } catch (error) {
+        // Could be the phone briefly offline (we'll retry next tick), a wrong API address, or a backend error.
+        $("chat-status").textContent = "Can't reach the server: " + error.message;
+        $("chat-status").hidden = false;
+      }
+    }
+
+    function startPolling() {
+      fetchMessages();
+      pollTimer = setInterval(fetchMessages, POLL_INTERVAL);
+    }
+
+    function stopPolling() {
+      clearInterval(pollTimer);
+      pollTimer = null;
+    }
+
+    // Pause polling while the app is in the background: saves battery, and Redis commands.
+    document.addEventListener("visibilitychange", () => {
+      if (!room) return;
+      if (document.hidden) stopPolling(); else startPolling();
+    });
+
+    function render(messages) {
+      const json = JSON.stringify(messages);
+      if (json === lastSeen) return;     // nothing new since last time
+      lastSeen = json;
+
+      const list = $("messages");
+      list.innerHTML = "";
+      for (const m of messages) {
+        const bubble = document.createElement("div");
+        bubble.className = "msg" + (m.from === myName ? " mine" : "");
+        const meta = document.createElement("small");
+        meta.textContent = `${m.from} · ${new Date(m.time).toLocaleTimeString([], { timeStyle: "short" })}`;
+        bubble.append(meta, m.text);     // append() treats m.text as plain text, so nobody can inject HTML
+        list.append(bubble);
+      }
+      list.scrollTop = list.scrollHeight; // keep the newest message in view
+    }
+
+    // ---- Sending ---------------------------------------------------------------
+
+    $("send-form").addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const input = $("text-input");
+      const text = input.value.trim();
+      if (!text) return;
+      input.value = "";
+
+      await fetch(`${API}/api/messages`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ room, from: myName, text }),
+      });
+      fetchMessages();  // show it straight away instead of waiting for the next poll
+    });
+
+    // ---- Helpers -----------------------------------------------------------------
+
+    function setUrl(url) {
+      try { history.replaceState(null, "", url); }
+      catch { /* not allowed when index.html is opened straight from disk (file://); harmless */ }
+    }
+
+    function randomRoomCode() {
+      const adjectives = ["blue", "green", "quick", "sunny", "calm", "bright", "wild", "cosy"];
+      const nouns = ["fox", "owl", "river", "stone", "cloud", "leaf", "moon", "kite"];
+      const pick = (list) => list[Math.floor(Math.random() * list.length)];
+      return `${pick(adjectives)}-${pick(nouns)}-${Math.floor(Math.random() * 90 + 10)}`;
+    }
+  </script>
+</body>
+</html>
