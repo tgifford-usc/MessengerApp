@@ -75,8 +75,8 @@
   </section>
 
   <script>
-    // ⬇ CHANGE THIS to your own backend's address (the Vercel URL, with no trailing slash)
-    const API = "https://messenger-coral-xi.vercel.app/";
+    // ⬇ CHANGE THIS to your own backend's address (the Vercel URL)
+    const API = "https://messenger-coral-xi.vercel.app";
 
     const POLL_INTERVAL = 2000;  // milliseconds between checks for new messages
 
@@ -123,7 +123,9 @@
 
     async function fetchMessages() {
       try {
-        const response = await fetch(`${API}/api/messages?room=${encodeURIComponent(room)}`);
+        const url = new URL("/api/messages", API);   // new URL() copes with API ending in "/" or not
+        url.searchParams.set("room", room);
+        const response = await fetch(url);
         const data = await response.json();
         if (!response.ok) throw new Error(data.error || response.statusText);  // the backend explained what's wrong
         render(data);
@@ -178,7 +180,7 @@
       if (!text) return;
       input.value = "";
 
-      await fetch(`${API}/api/messages`, {
+      await fetch(new URL("/api/messages", API), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ room, from: myName, text }),

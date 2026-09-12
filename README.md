@@ -11,7 +11,7 @@ The phone half of a tiny chat app: a single `index.html`, hosted on GitHub Pages
 
 **Testing on your laptop first:** run the backend locally (`npm run dev` in its folder), set `API` to `http://localhost:3000`, and open `index.html` straight from disk. Two browser windows make two "phones".
 
-If the app says "Can't reach the server", the message after the colon is the clue: "Failed to fetch" usually means the `API` address is wrong (or the backend isn't sending CORS headers); anything else is the backend telling you what's missing.
+If the app says "Can't reach the server", the message after the colon is the clue. "Failed to fetch" means the browser never got a usable answer: check the `API` address for typos, and open it in a new tab to see whether the backend's status page loads. Anything else is the backend telling you what's wrong. (If the browser console mentions CORS, it's nearly always the address, not CORS itself.)
 
 ## How it works
 
